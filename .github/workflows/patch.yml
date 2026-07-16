@@ -34,16 +34,26 @@ jobs:
 
       - name: Patch with Objection
         run: |
-          objection patchipa --source "${{ env.IPA_NAME }}" --output Threads_patched.ipa
+          objection patchipa --source "${{ env.IPA_NAME }}"
+          PATCHED=$(ls *-frida-codesigned.ipa 2>/dev/null | head -1)
+          if [ -z "$PATCHED" ]; then
+            PATCHED=$(ls *-patched.ipa 2>/dev/null | head -1)
+          fi
+          if [ -z "$PATCHED" ]; then
+            # fallback: just find any ipa that isnt the source
+            PATCHED=$(ls *.ipa 2>/dev/null | grep -v "${{ env.IPA_NAME }}" | head -1)
+          fi
+          echo "PATCHED_FILE=$PATCHED" >> $GITHUB_ENV
+          echo "Patched file: $PATCHED"
 
       - name: Upload patched IPA
         uses: actions/upload-artifact@v4
         with:
           name: Threads-Patched
-          path: Threads_patched.ipa
+          path: ${{ env.PATCHED_FILE }}
 
       - name: Upload patched IPA to release
         run: |
-          gh release upload v1 --repo olegmrponsao34-boop/threads-patcher Threads_patched.ipa --clobber
+          gh release upload v1 --repo olegmrponsao34-boop/threads-patcher "${{ env.PATCHED_FILE }}" --clobber
         env:
           GH_TOKEN: ${{ github.token }}
