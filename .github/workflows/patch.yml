@@ -1,0 +1,40 @@
+﻿name: Patch Threads IPA
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  patch:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tools
+        run: |
+          pip install frida-tools objection
+
+      - name: Find IPA
+        run: |
+          IPA_FILE=$(ls *.ipa 2>/dev/null | head -1)
+          if [ -z "$IPA_FILE" ]; then
+            echo "Error: No .ipa file found"
+            exit 1
+          fi
+          echo "IPA_NAME=$IPA_FILE" >> $GITHUB_ENV
+          echo "Found: $IPA_FILE"
+
+      - name: Patch with Objection
+        run: |
+          objection patchipa --source "${{ env.IPA_NAME }}" --output Threads_patched.ipa
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Threads-Patched
+          path: Threads_patched.ipa
