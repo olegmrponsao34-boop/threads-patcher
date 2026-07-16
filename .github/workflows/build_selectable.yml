@@ -1,0 +1,65 @@
+name: Build Threads IPA (FridaGadget Selectable)
+on:
+  workflow_dispatch:
+    inputs:
+      frida_version:
+        description: 'FridaGadget version (16.5.9 or 17.15.5)'
+        required: true
+        default: '16.5.9'
+        type: choice
+        options:
+          - '16.5.9'
+          - '17.15.5'
+
+jobs:
+  patch:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compile insert_dylib
+        run: |
+          git clone https://github.com/Tyilo/insert_dylib /tmp/insert_dylib
+          cd /tmp/insert_dylib
+          xcodebuild -project insert_dylib.xcodeproj -scheme insert_dylib -configuration Release SYMROOT=/tmp/build
+          sudo cp /tmp/build/Release/insert_dylib /usr/local/bin/insert_dylib
+
+      - name: Download base IPA from release
+        run: |
+          gh release download v1 --repo olegmrponsao34-boop/threads-patcher --pattern "*.ipa"
+          echo "IPA=$(ls *.ipa | head -1)" >> $GITHUB_ENV
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Patch with FridaGadget ${{ github.event.inputs.frida_version }}
+        run: |
+          set -x
+          FRIDA_VER="${{ github.event.inputs.frida_version }}"
+          
+          mkdir -p Payload
+          unzip -o "${{ env.IPA }}" -d appdir/
+          
+          APP=$(ls appdir/Payload/ | head -1)
+          BINARY="appdir/Payload/$APP/$(echo $APP | sed 's/\.app$//')"
+          echo "Binary: $BINARY"
+          
+          curl -sL -o FridaGadget.dylib "https://github.com/frida/frida/releases/download/${FRIDA_VER}/frida-gadget-${FRIDA_VER}-ios-universal.dylib"
+          
+          mkdir -p "appdir/Payload/$APP/Frameworks"
+          cp FridaGadget.dylib "appdir/Payload/$APP/Frameworks/"
+          chmod +x "appdir/Payload/$APP/Frameworks/FridaGadget.dylib"
+          codesign -f -s - "appdir/Payload/$APP/Frameworks/FridaGadget.dylib"
+          
+          insert_dylib --inplace --all-yes "@executable_path/Frameworks/FridaGadget.dylib" "$BINARY"
+          
+          cd appdir
+          zip -r ../Threads_patched_${FRIDA_VER}.ipa Payload/
+          cd ..
+          
+          echo "Done! Size: $(ls -lh Threads_patched_${FRIDA_VER}.ipa | awk '{print $5}')"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Threads_FridaGadget_${{ github.event.inputs.frida_version }}
+          path: Threads_patched_${{ github.event.inputs.frida_version }}.ipa
