@@ -15,69 +15,40 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: Install tools
         run: |
           pip install frida-tools objection
           npm install -g applesign
-          brew install xz
+
+      - name: Compile insert_dylib
+        run: |
           git clone https://github.com/Tyilo/insert_dylib /tmp/insert_dylib
-          cd /tmp/insert_dylib && xcodebuild && cp build/Release/insert_dylib /usr/local/bin/insert_dylib
+          cd /tmp/insert_dylib
+          xcodebuild -project insert_dylib.xcodeproj -scheme insert_dylib -configuration Release SYMROOT=/tmp/build
+          cp /tmp/build/Release/insert_dylib /usr/local/bin/insert_dylib
+          insert_dylib --help
 
       - name: Download IPA from release
         run: |
           gh release download v1 --repo olegmrponsao34-boop/threads-patcher --pattern "*.ipa"
-          IPA_FILE=$(ls *.ipa 2>/dev/null | head -1)
-          if [ -z "$IPA_FILE" ]; then
-            echo "Error: No .ipa file found in release"
-            exit 1
-          fi
-          echo "IPA_NAME=$IPA_FILE" >> $GITHUB_ENV
-          echo "Found: $IPA_FILE"
+          echo "IPA_NAME=$(ls *.ipa | head -1)" >> $GITHUB_ENV
         env:
           GH_TOKEN: ${{ github.token }}
 
       - name: Patch with Objection
         run: |
-          objection patchipa --source "${{ env.IPA_NAME }}" --codesign-signature "-" 2>&1 || true
-          PATCHED=$(ls *-frida-codesigned.ipa 2>/dev/null | head -1)
-          if [ -z "$PATCHED" ]; then
-            PATCHED=$(ls *-patched.ipa 2>/dev/null | head -1)
-          fi
-          if [ -z "$PATCHED" ]; then
-            PATCHED=$(ls *.ipa 2>/dev/null | grep -v "${{ env.IPA_NAME }}" | head -1)
-          fi
-          if [ -z "$PATCHED" ]; then
-            # Manual fallback: find any ipa in temp or work dir
-            PATCHED=$(find /tmp -name "*.ipa" -newer "${{ env.IPA_NAME }}" 2>/dev/null | head -1)
-          fi
-          echo "PATCHED_FILE=$PATCHED" >> $GITHUB_ENV
-          echo "Patched file: $PATCHED"
+          objection patchipa --source "${{ env.IPA_NAME }}" --codesign-signature "-"
+          echo "PATCHED_FILE=$(ls *-frida-codesigned.ipa *-patched.ipa 2>/dev/null | grep -v '${{ env.IPA_NAME }}' | head -1)" >> $GITHUB_ENV
 
       - name: Upload patched IPA
         uses: actions/upload-artifact@v4
-        if: env.PATCHED_FILE != ''
         with:
           name: Threads-Patched
-          path: ${{ env.PATCHED_FILE }}
+          path: "*-frida-codesigned.ipa"
 
-      - name: Upload patched IPA to release
-        if: env.PATCHED_FILE != ''
+      - name: Upload to release
         run: |
-          gh release upload v1 --repo olegmrponsao34-boop/threads-patcher "${{ env.PATCHED_FILE }}" --clobber
+          gh release upload v1 --repo olegmrponsao34-boop/threads-patcher *-frida-codesigned.ipa --clobber
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Debug - list all files
-        if: failure()
-        run: |
-          echo "=== Working dir ==="
-          ls -la
-          echo "=== Temp ==="
-          ls -la /tmp/ 2>/dev/null | head -20
-          echo "=== Home objection ==="
-          ls -la ~/.objection/ 2>/dev/null
