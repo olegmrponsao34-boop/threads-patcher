@@ -10,44 +10,59 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install tools
-        run: |
-          pip install frida-tools objection
-          npm install -g applesign
-
       - name: Compile insert_dylib
         run: |
           git clone https://github.com/Tyilo/insert_dylib /tmp/insert_dylib
           cd /tmp/insert_dylib
           xcodebuild -project insert_dylib.xcodeproj -scheme insert_dylib -configuration Release SYMROOT=/tmp/build
-          cp /tmp/build/Release/insert_dylib /usr/local/bin/insert_dylib
+          sudo cp /tmp/build/Release/insert_dylib /usr/local/bin/insert_dylib
 
-      - name: Download IPA from release
+      - name: Download IPA
         run: |
           gh release download v1 --repo olegmrponsao34-boop/threads-patcher --pattern "*.ipa"
-          echo "IPA_NAME=$(ls *.ipa | head -1)" >> $GITHUB_ENV
+          echo "IPA=$(ls *.ipa | head -1)" >> $GITHUB_ENV
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Patch with Objection
+      - name: Patch manually
         run: |
-          objection patchipa --source "${{ env.IPA_NAME }}" --codesign-signature "-"
-          echo "PATCHED_FILE=$(ls *-frida-codesigned.ipa *-patched.ipa 2>/dev/null | grep -v '${{ env.IPA_NAME }}' | head -1)" >> $GITHUB_ENV
+          set -x
 
-      - name: Upload patched IPA
+          # Extract
+          mkdir Payload
+          unzip -o "${{ env.IPA }}" -d appdir/
+
+          # Find app binary
+          APP=$(ls appdir/Payload/ | head -1)
+          BINARY="appdir/Payload/$APP/$(echo $APP | sed 's/\.app$//')"
+          echo "Binary: $BINARY"
+
+          # Download FridaGadget
+          curl -sL -o FridaGadget.dylib https://github.com/frida/frida/releases/download/17.15.5/frida-gadget-17.15.5-ios-universal.dylib
+
+          # Inject
+          mkdir -p "appdir/Payload/$APP/Frameworks"
+          cp FridaGadget.dylib "appdir/Payload/$APP/Frameworks/"
+          chmod +x "appdir/Payload/$APP/Frameworks/FridaGadget.dylib"
+          codesign -f -s - "appdir/Payload/$APP/Frameworks/FridaGadget.dylib"
+
+          insert_dylib --inplace --all-yes "@executable_path/Frameworks/FridaGadget.dylib" "$BINARY"
+
+          # Repackage
+          cd appdir
+          zip -q -r ../Threads_patched.ipa Payload/
+          cd ..
+
+          echo "Done! Size: $(ls -lh Threads_patched.ipa | awk '{print $5}')"
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: Threads-Patched
-          path: "*-frida-codesigned.ipa"
+          path: Threads_patched.ipa
 
       - name: Upload to release
         run: |
-          gh release upload v1 --repo olegmrponsao34-boop/threads-patcher *-frida-codesigned.ipa --clobber
+          gh release upload v1 --repo olegmrponsao34-boop/threads-patcher Threads_patched.ipa --clobber
         env:
           GH_TOKEN: ${{ github.token }}
-
