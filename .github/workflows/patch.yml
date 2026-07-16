@@ -1,8 +1,8 @@
 ﻿name: Patch Threads IPA
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
+  release:
+    types: [published]
 
 jobs:
   patch:
@@ -19,22 +19,31 @@ jobs:
         run: |
           pip install frida-tools objection
 
-      - name: Find IPA
+      - name: Download IPA from release
         run: |
+          gh release download v1 --repo olegmrponsao34-boop/threads-patcher --pattern "*.ipa"
           IPA_FILE=$(ls *.ipa 2>/dev/null | head -1)
           if [ -z "$IPA_FILE" ]; then
-            echo "Error: No .ipa file found"
+            echo "Error: No .ipa file found in release"
             exit 1
           fi
           echo "IPA_NAME=$IPA_FILE" >> $GITHUB_ENV
           echo "Found: $IPA_FILE"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Patch with Objection
         run: |
           objection patchipa --source "${{ env.IPA_NAME }}" --output Threads_patched.ipa
 
-      - name: Upload artifact
+      - name: Upload patched IPA
         uses: actions/upload-artifact@v4
         with:
           name: Threads-Patched
           path: Threads_patched.ipa
+
+      - name: Upload patched IPA to release
+        run: |
+          gh release upload v1 --repo olegmrponsao34-boop/threads-patcher Threads_patched.ipa --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
