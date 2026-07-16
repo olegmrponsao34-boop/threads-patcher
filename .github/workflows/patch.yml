@@ -50,7 +50,7 @@ jobs:
 
           # Repackage
           cd appdir
-          zip -q -r ../Threads_patched.ipa Payload/
+          zip -r ../Threads_patched.ipa Payload/
           cd ..
 
           echo "Done! Size: $(ls -lh Threads_patched.ipa | awk '{print $5}')"
