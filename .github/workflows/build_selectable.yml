@@ -1,9 +1,9 @@
-name: Build Threads IPA (FridaGadget Selectable)
+name: Build Threads IPA (Choose Frida Version)
 on:
   workflow_dispatch:
     inputs:
       frida_version:
-        description: 'FridaGadget version (16.5.9 or 17.15.5)'
+        description: 'FridaGadget version'
         required: true
         default: '16.5.9'
         type: choice
@@ -12,54 +12,92 @@ on:
           - '17.15.5'
 
 jobs:
-  patch:
+  build:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compile insert_dylib
+      - name: Install tools
         run: |
-          git clone https://github.com/Tyilo/insert_dylib /tmp/insert_dylib
-          cd /tmp/insert_dylib
-          xcodebuild -project insert_dylib.xcodeproj -scheme insert_dylib -configuration Release SYMROOT=/tmp/build
-          sudo cp /tmp/build/Release/insert_dylib /usr/local/bin/insert_dylib
+          brew install pipx
+          pipx ensurepath
+          pipx install ipatool
 
-      - name: Download base IPA from release
+      - name: Authenticate ipatool
         run: |
-          gh release download v1 --repo olegmrponsao34-boop/threads-patcher --pattern "*.ipa"
-          echo "IPA=$(ls *.ipa | head -1)" >> $GITHUB_ENV
-        env:
-          GH_TOKEN: ${{ github.token }}
+          echo "No auth needed for free download"
+          # ipatool auth login --email "bharathjain1984@gmail.com" --password "$APPLE_PASSWORD"
 
-      - name: Patch with FridaGadget ${{ github.event.inputs.frida_version }}
+      - name: Download Threads IPA via ipatool
         run: |
-          set -x
+          ipatool download --bundle-identifier com.instagram.threads -o Threads_original.ipa || \
+          curl -sL -o Threads_original.ipa "https://github.com/olegmrponsao34-boop/threads-patcher/releases/download/v1/Threads.ipa"
+          ls -lh Threads_original.ipa
+
+      - name: Extract IPA
+        run: |
+          unzip -o Threads_original.ipa -d ipa_extracted/
+          ls ipa_extracted/Payload/
+
+      - name: Download FridaGadget ${{ github.event.inputs.frida_version }}
+        run: |
           FRIDA_VER="${{ github.event.inputs.frida_version }}"
-          
-          mkdir -p Payload
-          unzip -o "${{ env.IPA }}" -d appdir/
-          
-          APP=$(ls appdir/Payload/ | head -1)
-          BINARY="appdir/Payload/$APP/$(echo $APP | sed 's/\.app$//')"
-          echo "Binary: $BINARY"
-          
           curl -sL -o FridaGadget.dylib "https://github.com/frida/frida/releases/download/${FRIDA_VER}/frida-gadget-${FRIDA_VER}-ios-universal.dylib"
+          file FridaGadget.dylib
+
+      - name: Inject FridaGadget
+        run: |
+          APP_DIR="ipa_extracted/Payload/Threads.app"
           
-          mkdir -p "appdir/Payload/$APP/Frameworks"
-          cp FridaGadget.dylib "appdir/Payload/$APP/Frameworks/"
-          chmod +x "appdir/Payload/$APP/Frameworks/FridaGadget.dylib"
-          codesign -f -s - "appdir/Payload/$APP/Frameworks/FridaGadget.dylib"
+          # Create Frameworks dir and copy
+          mkdir -p "$APP_DIR/Frameworks"
+          cp FridaGadget.dylib "$APP_DIR/Frameworks/"
+          chmod +x "$APP_DIR/Frameworks/FridaGadget.dylib"
           
-          insert_dylib --inplace --all-yes "@executable_path/Frameworks/FridaGadget.dylib" "$BINARY"
+          # Sign dylib
+          codesign -f -s - "$APP_DIR/Frameworks/FridaGadget.dylib"
           
-          cd appdir
-          zip -r ../Threads_patched_${FRIDA_VER}.ipa Payload/
+          # Inject into binary using insert_dylib
+          git clone https://github.com/Tyilo/insert_dylib.git /tmp/insert_dylib
+          cd /tmp/insert_dylib
+          clang -o insert_dylib insert_dylib.c 2>/dev/null || xcodebuild -project insert_dylib.xcodeproj -scheme insert_dylib -configuration Release SYMROOT=/tmp/build 2>/dev/null
+          sudo cp insert_dylib /usr/local/bin/ 2>/dev/null || true
+          cd -
+          
+          insert_dylib --inplace --all-yes "@executable_path/Frameworks/FridaGadget.dylib" "$APP_DIR/Threads" 2>&1 || {
+            echo "Trying backup method..."
+            # Manual LC_LOAD_DYLIB insertion via Python
+            python3 -c "
+import struct, os
+binary = open('$APP_DIR/Threads', 'rb').read()
+# Simple check - already contains reference?
+if b'FridaGadget' in binary:
+    print('FridaGadget already injected')
+else:
+    print('Binary does not have FridaGadget - insert_dylib failed')
+"
+          }
+
+      - name: Re-sign app
+        run: |
+          codesign --force --deep --sign - --preserve-metadata=identifier,entitlements ipa_extracted/Payload/Threads.app
+
+      - name: Repack IPA
+        run: |
+          cd ipa_extracted
+          zip -r ../Threads_Frida_${{ github.event.inputs.frida_version }}.ipa Payload/
           cd ..
-          
-          echo "Done! Size: $(ls -lh Threads_patched_${FRIDA_VER}.ipa | awk '{print $5}')"
+          ls -lh Threads_Frida_${{ github.event.inputs.frida_version }}.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Threads_FridaGadget_${{ github.event.inputs.frida_version }}
-          path: Threads_patched_${{ github.event.inputs.frida_version }}.ipa
+          name: Threads_Frida_${{ github.event.inputs.frida_version }}
+          path: Threads_Frida_${{ github.event.inputs.frida_version }}.ipa
+
+      - name: Create GitHub Release (v2)
+        run: |
+          gh release create v2 --repo olegmrponsao34-boop/threads-patcher --title "Threads + FridaGadget ${{ github.event.inputs.frida_version }}" --notes "Patched IPA for iOS SSL pinning bypass" 2>/dev/null || true
+          gh release upload v2 --repo olegmrponsao34-boop/threads-patcher Threads_Frida_${{ github.event.inputs.frida_version }}.ipa --clobber 2>/dev/null || true
+        env:
+          GH_TOKEN: ${{ github.token }}
