@@ -24,6 +24,9 @@ jobs:
         run: |
           pip install frida-tools objection
           npm install -g applesign
+          brew install xz
+          git clone https://github.com/Tyilo/insert_dylib /tmp/insert_dylib
+          cd /tmp/insert_dylib && xcodebuild && cp build/Release/insert_dylib /usr/local/bin/insert_dylib
 
       - name: Download IPA from release
         run: |
