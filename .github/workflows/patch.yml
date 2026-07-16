@@ -26,7 +26,6 @@ jobs:
           cd /tmp/insert_dylib
           xcodebuild -project insert_dylib.xcodeproj -scheme insert_dylib -configuration Release SYMROOT=/tmp/build
           cp /tmp/build/Release/insert_dylib /usr/local/bin/insert_dylib
-          insert_dylib --help
 
       - name: Download IPA from release
         run: |
