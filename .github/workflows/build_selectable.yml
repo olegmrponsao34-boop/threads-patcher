@@ -42,10 +42,8 @@ jobs:
 
           curl -sL -o /tmp/insert_dylib.zip "https://github.com/Tyilo/insert_dylib/archive/refs/heads/master.zip"
           unzip -o /tmp/insert_dylib.zip -d /tmp/
-          cd /tmp/insert_dylib-master
-          clang -o insert_dylib insert_dylib.c -framework CoreFoundation
-          cd -
-          /tmp/insert_dylib-master/insert_dylib --inplace --all-yes "@executable_path/Frameworks/FridaGadget.dylib" "$APP_DIR/Threads"
+          clang -o /tmp/insert_dylib -framework CoreFoundation /tmp/insert_dylib-master/insert_dylib/main.c
+          /tmp/insert_dylib --inplace --all-yes "@executable_path/Frameworks/FridaGadget.dylib" "$APP_DIR/Threads"
 
       - name: Re-sign app
         run: |
