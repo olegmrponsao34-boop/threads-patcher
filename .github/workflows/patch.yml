@@ -32,15 +32,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+      - name: Get codesign identity
+        run: |
+          # Get first available codesign identity
+          IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep -o '"[^"]*"' | head -1 | tr -d '"')
+          if [ -z "$IDENTITY" ]; then
+            # Use ad-hoc signing
+            IDENTITY="-"
+          fi
+          echo "CODESIGN_ID=$IDENTITY" >> $GITHUB_ENV
+          echo "Using identity: $IDENTITY"
+
       - name: Patch with Objection
         run: |
-          objection patchipa --source "${{ env.IPA_NAME }}"
+          objection patchipa --source "${{ env.IPA_NAME }}" --codesign-signature "${{ env.CODESIGN_ID }}"
           PATCHED=$(ls *-frida-codesigned.ipa 2>/dev/null | head -1)
           if [ -z "$PATCHED" ]; then
             PATCHED=$(ls *-patched.ipa 2>/dev/null | head -1)
           fi
           if [ -z "$PATCHED" ]; then
-            # fallback: just find any ipa that isnt the source
             PATCHED=$(ls *.ipa 2>/dev/null | grep -v "${{ env.IPA_NAME }}" | head -1)
           fi
           echo "PATCHED_FILE=$PATCHED" >> $GITHUB_ENV
